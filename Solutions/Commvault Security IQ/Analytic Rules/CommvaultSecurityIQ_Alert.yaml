@@ -35,8 +35,7 @@ tags:
 query: |
     CommvaultAlerts_CL
     | where TimeGenerated > ago(5m)
-    | where isnotempty(EventId)
-    | take 1000
+    | summarize arg_max(TimeGenerated, *) by ClientId, EventCode
 entityMappings:
   - entityType: Host
     fieldMappings:
