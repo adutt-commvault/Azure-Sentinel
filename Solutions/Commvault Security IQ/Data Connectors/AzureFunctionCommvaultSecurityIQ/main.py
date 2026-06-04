@@ -237,6 +237,12 @@ def to_int(value: Any, default: int = 0) -> int:
         return default
 
 
+TYPE1_MASK = 64
+TYPE2_MASK = 8192
+TYPE3_MASK = 32
+TYPE4_MASK = 512
+
+
 def decode_anomaly_type(anomaly_type: int) -> list[str]:
     """Decode bitmask anomaly type into human-readable flags.
 
@@ -253,13 +259,13 @@ def decode_anomaly_type(anomaly_type: int) -> list[str]:
     COMPOSITE_MASKS = {
         "ANOMALY_FILE_ACTIVITY": 15,
         "ANOMALY_APPLICATION_SIZE": 16,
-        "ANOMALY_MIME_CLASSIFICATION": 32,
-        "ANOMALY_RANSOMWARE": 64,
+        "ANOMALY_MIME_CLASSIFICATION": TYPE3_MASK,
+        "ANOMALY_RANSOMWARE": TYPE1_MASK,
         "ANOMALY_FILE_DATA": 128,
-        "ANOMALY_FILE_EXTENSION": 512,
+        "ANOMALY_FILE_EXTENSION": TYPE4_MASK,
         "ANOMALY_BACKUP_SIZE": 1024,
         "ANOMALY_DATA_WRITTEN": 4096,
-        "ANOMALY_VSA_DATA": 8192,
+        "ANOMALY_VSA_DATA": TYPE2_MASK,
         "ANOMALY_THIRD_PARTY_SOFTWARES": 65536,
     }
     decoded: list[str] = []
@@ -291,9 +297,9 @@ def normalize_anomaly(anomaly: dict[str, Any]) -> dict[str, Any]:
     occurrence_dt = datetime.fromtimestamp(ref_time, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     severity = "Low"
-    if anomaly_type & 64 == 64 or anomaly_type & 8192 == 8192:
+    if anomaly_type & TYPE1_MASK == TYPE1_MASK or anomaly_type & TYPE2_MASK == TYPE2_MASK:
         severity = "High"
-    elif anomaly_type & 32 == 32 or anomaly_type & 512 == 512:
+    elif anomaly_type & TYPE3_MASK == TYPE3_MASK or anomaly_type & TYPE4_MASK == TYPE4_MASK:
         severity = "Medium"
 
     description = (
@@ -468,9 +474,10 @@ def main(mytimer: func.TimerRequest) -> None:
                 f"Failed to get Company ID. Status code: {company_response.status_code}"
             )
 
-        # Fetch fromtime from blob storage
+        # Fetch fromtime from blob storage for client-side filtering.
+        # Note: The GET /Client/Anomaly endpoint does not support server-side time-window parameters 
+        # or pagination, so this checkpoint is applied client-side.
         current_date = datetime.now(timezone.utc)
-        to_time = int(current_date.timestamp())
 
         override_from_time_str = os.environ.get("OVERRIDE_FROM_TIME")
         if override_from_time_str:
@@ -502,6 +509,8 @@ def main(mytimer: func.TimerRequest) -> None:
         anomaly_endpoint = f"{url}/Client/Anomaly"
         logging.info(f"Threat Indicators endpoint: {anomaly_endpoint}")
 
+        # Note: The GET /Client/Anomaly endpoint does not support server-side time-window filtering 
+        # (e.g. fromTime/toTime) or pagination, so filtering by refTime is performed client-side.
         response = requests.get(anomaly_endpoint, headers=headers)
         logging.info(f"Response Status Code: {response.status_code}")
 
@@ -536,14 +545,19 @@ def main(mytimer: func.TimerRequest) -> None:
                     gen_chunks(normalized_data, logs_client)
                     logging.info("Job Succeeded")
                     logging.info("Function App Executed")
+
+                    # Advance the checkpoint using the max refTime actually ingested.
+                    # Note: We add +1 to start the next run's filter immediately after this max refTime.
+                    # A backward overlap is avoided to prevent duplicate uploads/ingestion charges,
+                    # as the stateless function app cannot query Sentinel to de-duplicate events across runs.
+                    # Query-side de-duplication is handled inside the Sentinel analytic rule.
+                    # Skip when OVERRIDE_FROM_TIME is active — test runs must not
+                    # corrupt the production checkpoint.
+                    if not override_from_time_str:
+                        new_checkpoint = max(to_int(a.get("refTime"), 0) for a in filtered_anomalies) + 1
+                        upload_timestamp_blob(cs, container_name, blob_name, new_checkpoint)
                 else:
                     logging.info("No new anomalies found to ingest.")
-
-                # Advance the checkpoint so the next run filters from now.
-                # Skip when OVERRIDE_FROM_TIME is active — test runs must not
-                # corrupt the production checkpoint.
-                if not override_from_time_str:
-                    upload_timestamp_blob(cs, container_name, blob_name, to_time + 1)
         elif response.status_code == 403:
             logging.error(
                 f"Failed to get anomalies. Status code: 403. Reason: {response.text}"

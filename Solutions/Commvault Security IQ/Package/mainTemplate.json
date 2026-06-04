@@ -105,7 +105,7 @@
                 "description": "This query identifies Alerts from Commvault Cloud.",
                 "displayName": "Commvault Cloud Alert",
                 "enabled": false,
-                "query": "CommvaultAlerts_CL\n| where TimeGenerated > ago(5m)\n| where isnotempty(EventId)\n| take 1000\n",
+                "query": "CommvaultAlerts_CL\n| where TimeGenerated > ago(5m)\n| summarize arg_max(TimeGenerated, *) by ClientId, EventCode",
                 "queryFrequency": "PT5M",
                 "queryPeriod": "PT5M",
                 "severity": "Medium",

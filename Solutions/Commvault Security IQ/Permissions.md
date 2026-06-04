@@ -23,7 +23,7 @@ This document provides detailed steps to configure the required permissions for 
 
 ---
 
-## 2. Grant Key Vault Secrets Officer Permission on the Key Vault
+## 2. Grant Key Vault Secrets User Permission on the Key Vault
 
 ### Steps:
 1. Navigate to the **Azure Portal**.
@@ -31,7 +31,7 @@ This document provides detailed steps to configure the required permissions for 
 3. If **Access Policies** are enabled:
    - Go to the **Access Policies** section.
    - Click **Add Access Policy**.
-   - In the **Permissions** dropdown, select **Get**,**Set**,**List**,**Delete** and **Purge** for secrets.
+   - In the Permissions dropdown, select Get and List for secrets.
    - In the **Principal** field, search for the **Managed Identity** of each Logic App:
      - `logic-app-disable-data-aging`
      - `logic-app-disable-saml-provider`
